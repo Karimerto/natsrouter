@@ -14,27 +14,27 @@ import (
 // Define new metrics for the middleware
 var (
 	prometheusMessageCount = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "nats_messages_total",
-		Help: "Total number of NATS messages received.",
-	},
-	[]string{"subject"})
+		prometheus.CounterOpts{
+			Name: "nats_messages_total",
+			Help: "Total number of NATS messages received.",
+		},
+		[]string{"subject"})
 
 	prometheusRequestDuration = prometheus.NewHistogramVec(
-	prometheus.HistogramOpts{
-		Name: "nats_request_duration_seconds",
-		Help: "Duration of NATS requests in seconds.",
-		Buckets: []float64{0.001, .005, .01, .025, .05, .075, .1, .25, .5, .75, 1.0, 2.5, 5.0, 7.5, 10.0},
-	}, []string{"subject"})
+		prometheus.HistogramOpts{
+			Name:    "nats_request_duration_seconds",
+			Help:    "Duration of NATS requests in seconds.",
+			Buckets: []float64{0.001, .005, .01, .025, .05, .075, .1, .25, .5, .75, 1.0, 2.5, 5.0, 7.5, 10.0},
+		}, []string{"subject"})
 
 	prometheusPayloadSize = prometheus.NewHistogramVec(
-	prometheus.HistogramOpts{
-		Name: "nats_payload_size_bytes",
-		Help: "Size of NATS payloads in bytes.",
-		Buckets: []float64{128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576},
-		// In case bigger sizes are needed, likely not
-		// , 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648
-	}, []string{"subject"})
+		prometheus.HistogramOpts{
+			Name:    "nats_payload_size_bytes",
+			Help:    "Size of NATS payloads in bytes.",
+			Buckets: []float64{128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576},
+			// In case bigger sizes are needed, likely not
+			// , 2097152, 4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648
+		}, []string{"subject"})
 )
 
 func init() {
