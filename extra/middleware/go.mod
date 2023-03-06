@@ -1,8 +1,8 @@
-module github.com/Karimerto/natsrouter/middleware
+module github.com/Karimerto/natsrouter/extra/middleware
 
 go 1.20
 
-replace github.com/Karimerto/natsrouter => ./..
+replace github.com/Karimerto/natsrouter => ../..
 
 require (
 	github.com/Karimerto/natsrouter v0.0.1
