@@ -64,7 +64,7 @@ func MetricsMiddleware(next natsrouter.NatsCtxHandler) natsrouter.NatsCtxHandler
 		// Report metrics to Prometheus or other monitoring system
 		prometheusRequestDuration.
 			With(prometheus.Labels{"subject": msg.Subject}).
-			Observe(float64(elapsed.Nanoseconds()))
+			Observe(float64(elapsed.Seconds()))
 		prometheusPayloadSize.
 			With(prometheus.Labels{"subject": msg.Subject}).
 			Observe(float64(payloadSize))
