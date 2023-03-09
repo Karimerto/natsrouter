@@ -1,5 +1,8 @@
 # NATS Router
 
+[![example workflow](https://github.com/Karimerto/natsrouter/actions/workflows/go.yml/badge.svg)](https://github.com/Karimerto/natsrouter/actions)
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/Karimerto/natsrouter)](https://pkg.go.dev/github.com/Karimerto/natsrouter)
+
 NATS Router is a simple package of utilities on top of [NATS messaging system](https://nats.io/). It simplified the creation of queue groups and subjects, adds basic middleware support and adds both context and error handling to NATS subscriptions.
 
 ## Usage
