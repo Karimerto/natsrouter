@@ -16,6 +16,7 @@ package natsrouter
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	"github.com/nats-io/nats.go"
 )
@@ -32,6 +33,8 @@ type NatsRouter struct {
 	nc      *nats.Conn
 	mw      []NatsMiddlewareFunc
 	options *RouterOptions
+	quit    chan struct{}
+	chanWg  sync.WaitGroup
 }
 
 // Defines a struct for the router options, which currently only contains
@@ -79,6 +82,7 @@ func NewRouter(nc *nats.Conn, options ...RouterOption) *NatsRouter {
 			&ErrorConfig{"error", "json"},
 			"request_id",
 		},
+		quit: make(chan struct{}),
 	}
 
 	for _, opt := range options {
@@ -104,6 +108,8 @@ func NewRouterWithAddress(addr string, options ...RouterOption) (*NatsRouter, er
 
 // Close connection to NATS server
 func (n *NatsRouter) Close() {
+	close(n.quit)
+	n.chanWg.Wait()
 	n.nc.Close()
 }
 
@@ -118,6 +124,7 @@ func (n *NatsRouter) WithMiddleware(fns ...NatsMiddlewareFunc) *NatsRouter {
 		nc:      n.nc,
 		mw:      append(n.mw, fns...),
 		options: n.options,
+		quit:    make(chan struct{}),
 	}
 }
 
@@ -176,6 +183,80 @@ func (n *NatsRouter) msgHandler(handler NatsCtxHandler) func(*nats.Msg) {
 			reply.Data = errData
 
 			msg.RespondMsg(reply)
+		}
+	}
+}
+
+// Same as Subscribe, except uses channels. Note that error handling is
+// available only for middleware, since the message is processed first by
+// middleware and then inserted into the *NatsMsg channel.
+func (n *NatsRouter) ChanSubscribe(subject string, ch chan *NatsMsg) (*nats.Subscription, error) {
+	intCh := make(chan *nats.Msg, 64)
+	n.chanWg.Add(1)
+	go n.chanMsgHandler(ch, intCh)
+	return n.nc.ChanSubscribe(subject, intCh)
+}
+
+// Same as QueueSubscribe, except uses channels. Note that error handling is
+// available only for middleware, since the message is processed first by
+// middleware and then inserted into the *NatsMsg channel.
+func (n *NatsRouter) ChanQueueSubscribe(subject, group string, ch chan *NatsMsg) (*nats.Subscription, error) {
+	intCh := make(chan *nats.Msg, 64)
+	n.chanWg.Add(1)
+	go n.chanMsgHandler(ch, intCh)
+	return n.nc.ChanQueueSubscribe(subject, group, intCh)
+}
+
+// Handler that wraps function call with any registered middleware functions in
+// reverse order. On any error, an error message is automatically sent as a
+// response to the request.
+func (n *NatsRouter) chanMsgHandler(ch chan *NatsMsg, intCh chan *nats.Msg) {
+	defer n.chanWg.Done()
+
+	handler := func(natsMsg *NatsMsg) error {
+		ch <- natsMsg
+		return nil
+	}
+
+chanLoop:
+	for {
+		select {
+		case msg := <-intCh:
+			natsMsg := &NatsMsg{
+				msg,
+				context.Background(),
+			}
+
+			var wrappedHandler NatsCtxHandler = handler
+			for i := len(n.mw) - 1; i >= 0; i-- {
+				wrappedHandler = n.mw[i](wrappedHandler)
+			}
+			// Errors are only handled for the middleware
+			err := wrappedHandler(natsMsg)
+
+			if err != nil {
+				handlerErr, ok := err.(*HandlerError)
+				if !ok {
+					handlerErr = &HandlerError{
+						Message: err.Error(),
+						Code:    500,
+					}
+				}
+				errData, _ := json.Marshal(handlerErr)
+
+				reply := nats.NewMsg(msg.Reply)
+				if len(n.options.requestIdTag) > 0 {
+					if reqId, ok := msg.Header[n.options.requestIdTag]; ok {
+						reply.Header.Add(n.options.requestIdTag, reqId[0])
+					}
+				}
+				reply.Header.Add(n.options.ec.Tag, n.options.ec.Format)
+				reply.Data = errData
+
+				msg.RespondMsg(reply)
+			}
+		case <-n.quit:
+			break chanLoop
 		}
 	}
 }

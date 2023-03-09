@@ -109,3 +109,20 @@ func (s *Subject) Subscribe(handler NatsCtxHandler) (*nats.Subscription, error) 
 		return s.n.Subscribe(subject, handler)
 	}
 }
+
+// Same as Subscribe, with channel support
+func (s *Subject) ChanSubscribe(ch chan *NatsMsg) (*nats.Subscription, error) {
+	if s.queue != nil {
+		subject, err := s.getSubject()
+		if err != nil {
+			return nil, err
+		}
+		return s.queue.ChanSubscribe(subject, ch)
+	} else {
+		subject, err := s.getSubject()
+		if err != nil {
+			return nil, err
+		}
+		return s.n.ChanSubscribe(subject, ch)
+	}
+}

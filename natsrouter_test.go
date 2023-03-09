@@ -450,3 +450,82 @@ func TestRequestId(t *testing.T) {
 		}
 	})
 }
+
+func TestChanSubscribe(t *testing.T) {
+	// Create test server and router
+	s, nr := getServerAndRouter(t)
+	defer s.Shutdown()
+
+	nc := nr.Conn()
+	defer nr.Close()
+
+	respond := func(ch chan *NatsMsg) {
+		msg := <-ch
+		err := msg.RespondWithOriginalHeaders(msg.Data)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+
+	t.Run("channel-based subscribe", func(t *testing.T) {
+		sub := nr.Subject("foo")
+		ch := make(chan *NatsMsg, 4)
+		// _, err := sub.Subscribe(emptyHandler)
+		_, err := sub.ChanSubscribe(ch)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Start a function to read the request and send a response
+		go respond(ch)
+
+		// Create message and send a request
+		msg := nats.NewMsg("foo")
+		msg.Data = []byte("data")
+		reqId := "req-1"
+		msg.Header.Add("request_id", reqId)
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		got := reply.Header.Get("request_id")
+		if got != reqId {
+			t.Errorf("header request_id does not match, expected %s, received %s", reqId, got)
+		}
+		if !bytes.Equal(msg.Data, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(msg.Data), string(reply.Data))
+		}
+	})
+
+	t.Run("channel-based queue subscribe", func(t *testing.T) {
+		sub := nr.Queue("group").Subject("foo")
+		ch := make(chan *NatsMsg, 4)
+		// _, err := sub.Subscribe(emptyHandler)
+		_, err := sub.ChanSubscribe(ch)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Start a function to read the request and send a response
+		go respond(ch)
+
+		// Create message and send a request
+		msg := nats.NewMsg("foo")
+		msg.Data = []byte("data")
+		reqId := "req-1"
+		msg.Header.Add("request_id", reqId)
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		got := reply.Header.Get("request_id")
+		if got != reqId {
+			t.Errorf("header request_id does not match, expected %s, received %s", reqId, got)
+		}
+		if !bytes.Equal(msg.Data, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(msg.Data), string(reply.Data))
+		}
+	})
+}

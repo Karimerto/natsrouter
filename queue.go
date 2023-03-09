@@ -29,6 +29,11 @@ func (q *Queue) Subscribe(subject string, handler NatsCtxHandler) (*nats.Subscri
 	return q.n.QueueSubscribe(subject, q.group, handler)
 }
 
+// Same as Subscribe, with channel support
+func (q *Queue) ChanSubscribe(subject string, ch chan *NatsMsg) (*nats.Subscription, error) {
+	return q.n.ChanQueueSubscribe(subject, q.group, ch)
+}
+
 // Create a new `Subject` object that is part of this `Queue` group
 func (q *Queue) Subject(subjects ...string) *Subject {
 	return &Subject{
