@@ -48,7 +48,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("accept login", func(t *testing.T) {
 		// Create router and connect to test server
-		nr, err := natsrouter.NewRouterWithAddress(s.Addr().String())
+		nr, err := natsrouter.Connect(s.Addr().String())
 		am := NewAuthMiddleware(func(token string) bool { return true })
 		nr = nr.Use(am.Auth)
 		if err != nil {
@@ -94,7 +94,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("reject login", func(t *testing.T) {
 		// Create router and connect to test server
-		nr, err := natsrouter.NewRouterWithAddress(s.Addr().String())
+		nr, err := natsrouter.Connect(s.Addr().String())
 		am := NewAuthMiddleware(func(token string) bool { return false })
 		nr = nr.Use(am.Auth)
 		if err != nil {
@@ -145,7 +145,7 @@ func TestAuthMiddleware(t *testing.T) {
 		tag := "err"
 		format := "proto"
 
-		nr, err := natsrouter.NewRouterWithAddress(s.Addr().String(), natsrouter.WithErrorConfigString(tag, format))
+		nr, err := natsrouter.Connect(s.Addr().String(), natsrouter.WithErrorConfigString(tag, format))
 		am := NewAuthMiddleware(func(token string) bool { return false })
 		nr = nr.Use(am.Auth)
 		if err != nil {
@@ -185,7 +185,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	t.Run("missing login", func(t *testing.T) {
 		// Create router and connect to test server
-		nr, err := natsrouter.NewRouterWithAddress(s.Addr().String())
+		nr, err := natsrouter.Connect(s.Addr().String())
 		am := NewAuthMiddleware(func(token string) bool { return false })
 		nr = nr.Use(am.Auth)
 		if err != nil {

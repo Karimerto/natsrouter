@@ -48,7 +48,7 @@ func TestRunServer(t *testing.T) {
 	defer nc.Close()
 }
 
-func TestNewNatsRouter(t *testing.T) {
+func TestConnect(t *testing.T) {
 	// Create test server
 	opts := &server.Options{Host: "localhost", Port: server.RANDOM_PORT, NoSigs: true}
 	s, err := runServer(opts)
@@ -58,14 +58,14 @@ func TestNewNatsRouter(t *testing.T) {
 	defer s.Shutdown()
 
 	// Create router and connect to test server
-	nr, err := NewRouterWithAddress(s.Addr().String())
+	nr, err := Connect(s.Addr().String())
 	if err != nil {
 		t.Fatalf("Could not connect to NATS server: %v", err)
 	}
 	defer nr.Close()
 }
 
-func TestNew(t *testing.T) {
+func TestOptionsConnect(t *testing.T){
 	// Create test server
 	opts := &server.Options{Host: "localhost", Port: server.RANDOM_PORT, NoSigs: true}
 	s, err := runServer(opts)
@@ -74,15 +74,44 @@ func TestNew(t *testing.T) {
 	}
 	defer s.Shutdown()
 
-	// Connect client
-	nc, err := nats.Connect(s.Addr().String())
+	// Create router and connect to test server
+	rOpts := GetDefaultRouterOptions()
+	nr, err := rOpts.Connect()
 	if err != nil {
 		t.Fatalf("Could not connect to NATS server: %v", err)
 	}
-
-	// Create router
-	nr := NewRouter(nc)
 	defer nr.Close()
+}
+
+func TestDrain(t *testing.T){
+	// Create test server
+	opts := &server.Options{Host: "localhost", Port: server.RANDOM_PORT, NoSigs: true}
+	s, err := runServer(opts)
+	if err != nil {
+		t.Fatalf("Could not start NATS server: %v", err)
+	}
+	defer s.Shutdown()
+
+	// Create router and connect to test server
+	ch := make(chan struct{})
+	rOpts := RouterOptions{
+		NatsOptions: nats.Options{
+			ClosedCB: func(_ *nats.Conn) {
+				close (ch)
+			},
+		},
+	}
+	nr, err := rOpts.Connect()
+	if err != nil {
+		t.Fatalf("Could not connect to NATS server: %v", err)
+	}
+	nr.Drain()
+
+	select {
+	case <-ch:
+	default:
+		t.Error("Channel is not closed")
+	}
 }
 
 func getServer(t *testing.T) *server.Server {
@@ -100,7 +129,7 @@ func getServerAndRouter(t *testing.T) (*server.Server, *NatsRouter) {
 	s := getServer(t)
 
 	// Create router and connect to test server
-	nr, err := NewRouterWithAddress(s.Addr().String())
+	nr, err := Connect(s.Addr().String())
 	if err != nil {
 		t.Fatalf("Could not connect to NATS server: %v", err)
 	}
@@ -339,7 +368,7 @@ func TestError(t *testing.T) {
 		// Create router and connect to test server
 		tag := "err"
 		format := "proto"
-		nr, err := NewRouterWithAddress(s.Addr().String(), WithErrorConfigString(tag, format))
+		nr, err := Connect(s.Addr().String(), WithErrorConfigString(tag, format))
 		if err != nil {
 			t.Fatalf("Could not connect to NATS server: %v", err)
 		}
@@ -419,7 +448,7 @@ func TestRequestId(t *testing.T) {
 
 		// Create router and connect to test server
 		tag := "reqid"
-		nr, err := NewRouterWithAddress(s.Addr().String(), WithRequestIdTag(tag))
+		nr, err := Connect(s.Addr().String(), WithRequestIdTag(tag))
 		if err != nil {
 			t.Fatalf("Could not connect to NATS server: %v", err)
 		}

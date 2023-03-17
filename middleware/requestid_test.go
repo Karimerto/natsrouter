@@ -17,7 +17,7 @@ func TestRequestIdMiddleware(t *testing.T) {
 
 	t.Run("default request_id header", func(t *testing.T) {
 		// Create router and connect to test server
-		nr, err := natsrouter.NewRouterWithAddress(s.Addr().String())
+		nr, err := natsrouter.Connect(s.Addr().String())
 		nr = nr.Use(RequestIdMiddleware())
 		if err != nil {
 			t.Fatalf("Could not connect to NATS server: %v", err)
@@ -68,7 +68,7 @@ func TestRequestIdMiddleware(t *testing.T) {
 		headerTag := "reqid"
 
 		// Create router and connect to test server
-		nr, err := natsrouter.NewRouterWithAddress(s.Addr().String())
+		nr, err := natsrouter.Connect(s.Addr().String())
 		nr = nr.Use(RequestIdMiddleware(headerTag))
 		if err != nil {
 			t.Fatalf("Could not connect to NATS server: %v", err)
@@ -116,7 +116,7 @@ func TestRequestIdMiddleware(t *testing.T) {
 
 	t.Run("missing request_id header", func(t *testing.T) {
 		// Create router and connect to test server
-		nr, err := natsrouter.NewRouterWithAddress(s.Addr().String())
+		nr, err := natsrouter.Connect(s.Addr().String())
 		nr = nr.Use(RequestIdMiddleware())
 		if err != nil {
 			t.Fatalf("Could not connect to NATS server: %v", err)
