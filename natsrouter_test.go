@@ -76,6 +76,7 @@ func TestOptionsConnect(t *testing.T){
 
 	// Create router and connect to test server
 	rOpts := GetDefaultRouterOptions()
+	rOpts.NatsOptions.Url = s.Addr().String()
 	nr, err := rOpts.Connect()
 	if err != nil {
 		t.Fatalf("Could not connect to NATS server: %v", err)
@@ -96,6 +97,7 @@ func TestDrain(t *testing.T){
 	ch := make(chan struct{})
 	rOpts := RouterOptions{
 		NatsOptions: nats.Options{
+			Url: s.Addr().String(),
 			ClosedCB: func(_ *nats.Conn) {
 				close (ch)
 			},
