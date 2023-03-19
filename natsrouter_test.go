@@ -3,6 +3,7 @@ package natsrouter
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -281,7 +282,7 @@ func TestMiddlewareChain(t *testing.T) {
 	nc := nr.Conn()
 
 	t.Run("subscribe with middleware to single subject", func(t *testing.T) {
-		sub := nr.Subject("foo")
+		sub := nr.Subject("foo1")
 		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.Subscribe(handler)
 		if err != nil {
@@ -289,7 +290,7 @@ func TestMiddlewareChain(t *testing.T) {
 		}
 
 		// Create message and send a request
-		msg := nats.NewMsg("foo")
+		msg := nats.NewMsg("foo1")
 		msg.Data = []byte("data")
 
 		reply, err := nc.RequestMsg(msg, 1*time.Second)
@@ -302,7 +303,7 @@ func TestMiddlewareChain(t *testing.T) {
 	})
 
 	t.Run("subscribe with middleware and queue group to single subject", func(t *testing.T) {
-		sub := nr.Queue("group").Subject("foo")
+		sub := nr.Queue("group").Subject("foo2")
 		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.Subscribe(handler)
 		if err != nil {
@@ -310,7 +311,7 @@ func TestMiddlewareChain(t *testing.T) {
 		}
 
 		// Create message and send a request
-		msg := nats.NewMsg("foo")
+		msg := nats.NewMsg("foo2")
 		msg.Data = []byte("data")
 
 		reply, err := nc.RequestMsg(msg, 1*time.Second)
@@ -319,6 +320,262 @@ func TestMiddlewareChain(t *testing.T) {
 		}
 		if !bytes.Equal(msg.Data, reply.Data) {
 			t.Errorf("responses do not match, expected %s, received %s", string(msg.Data), string(reply.Data))
+		}
+	})
+}
+
+func TestEncodedMiddleware(t *testing.T) {
+	// define some middleware functions
+	myMiddleware := func(next NatsCtxHandler) NatsCtxHandler {
+		return func(msg *NatsMsg) error {
+			ctx := context.WithValue(msg.Context(), "key1", "value1")
+			return next(msg.WithContext(ctx))
+		}
+	}
+
+	// Using any type of function without Msg requires "Reply" address to be saved
+	replyMiddleware := func(next NatsCtxHandler) NatsCtxHandler {
+		return func(msg *NatsMsg) error {
+			ctx := context.WithValue(msg.Context(), "reply", msg.Reply)
+			return next(msg.WithContext(ctx))
+		}
+	}
+
+	type Person struct {
+		Name string `json:"name,omitempty"`
+		Age  uint   `json:"age,omitempty"`
+	}
+
+	// Create test server and router
+	s, nr := getServerAndRouter(t)
+	defer s.Shutdown()
+
+	// Add first middleware
+	nr = nr.Use(myMiddleware)
+	defer nr.Close()
+
+	// Get underlying connection
+	nc := nr.Conn()
+
+	t.Run("subscribe with encoded middleware (*NatsMsg)", func(t *testing.T) {
+		// Basic function with one parameter
+		handler := func(msg *NatsMsg) {
+			if msg.Context().Value("key1") != "value1" {
+				t.Errorf("Expected key1 to be value1")
+			}
+			if err := msg.Respond(msg.Data); err != nil {
+				t.Errorf("Failed to publish reply: %v", err)
+			}
+		}
+
+		// Setup middleware, note that the encoding type does not matter
+		em, err := NewEncodedMiddleware(handler, "default")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Add middleware
+		nr2 := nr.Use(em.EncodedMiddleware)
+
+		sub := nr2.Subject("foo1")
+		_, err = sub.Subscribe(emptyHandler) // emptyHandler is never called
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg("foo1")
+		msg.Data = []byte("data")
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !bytes.Equal(msg.Data, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(msg.Data), string(reply.Data))
+		}
+	})
+
+	t.Run("subscribe with encoded middleware (context.Context, *nats.Msg)", func(t *testing.T) {
+		// Basic function with context and nats.Msg parameter
+		handler := func(ctx context.Context, msg *nats.Msg) {
+			if ctx.Value("key1") != "value1" {
+				t.Errorf("Expected key1 to be value1")
+			}
+			if err := msg.Respond(msg.Data); err != nil {
+				t.Errorf("Failed to publish reply: %v", err)
+			}
+		}
+
+		// Setup middleware, note that the encoding type does not matter
+		em, err := NewEncodedMiddleware(handler, "default")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Add middleware
+		nr2 := nr.Use(em.EncodedMiddleware)
+
+		sub := nr2.Subject("foo2")
+		_, err = sub.Subscribe(emptyHandler)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg("foo2")
+		msg.Data = []byte("data")
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !bytes.Equal(msg.Data, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(msg.Data), string(reply.Data))
+		}
+	})
+
+	t.Run("subscribe with encoded middleware (context.Context, *Person)", func(t *testing.T) {
+		// Basic function with context and json-encoded parameter
+		handler := func(ctx context.Context, p *Person) {
+			if ctx.Value("key1") != "value1" {
+				t.Errorf("Expected key1 to be value1")
+			}
+			if p.Name != "someone" {
+				t.Errorf("Expected name to be someone")
+			}
+			reply := ctx.Value("reply").(string)
+			if err := nc.Publish(reply, []byte(p.Name)); err != nil {
+				t.Errorf("Failed to publish reply: %v", err)
+			}
+		}
+
+		// Setup middleware, note that the encoding type does not matter
+		em, err := NewEncodedMiddleware(handler, "json")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Add middleware
+		nr2 := nr.Use(replyMiddleware, em.EncodedMiddleware)
+
+		sub := nr2.Subject("foo3")
+		_, err = sub.Subscribe(emptyHandler)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg("foo3")
+		p := Person{Name: "someone", Age: 25}
+		msg.Data, err = json.Marshal(p)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !bytes.Equal([]byte("someone"), reply.Data) {
+			t.Errorf("responses do not match, expected someone, received %s", string(reply.Data))
+		}
+	})
+
+	t.Run("subscribe with encoded middleware (context.Context, subject, *Person)", func(t *testing.T) {
+		// Basic function with context, subject and json-encoded parameter
+		handler := func(ctx context.Context, subject string, p *Person) {
+			if ctx.Value("key1") != "value1" {
+				t.Errorf("Expected key1 to be value1")
+			}
+			if p.Name != "someone" {
+				t.Errorf("Expected name to be someone")
+			}
+			if subject != "foo4" {
+				t.Errorf("Expected subject to be foo")
+			}
+			reply := ctx.Value("reply").(string)
+			if err := nc.Publish(reply, []byte(p.Name)); err != nil {
+				t.Errorf("Failed to publish reply: %v", err)
+			}
+		}
+
+		// Setup middleware, note that the encoding type does not matter
+		em, err := NewEncodedMiddleware(handler, "json")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Add middleware
+		nr2 := nr.Use(replyMiddleware, em.EncodedMiddleware)
+
+		sub := nr2.Subject("foo4")
+		_, err = sub.Subscribe(emptyHandler)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg("foo4")
+		p := Person{Name: "someone", Age: 25}
+		msg.Data, err = json.Marshal(p)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !bytes.Equal([]byte("someone"), reply.Data) {
+			t.Errorf("responses do not match, expected someone, received %s", string(reply.Data))
+		}
+	})
+
+	t.Run("subscribe with encoded middleware (context.Context, *Person)", func(t *testing.T) {
+		// Basic function with context, subject. reply and json-encoded parameter
+		handler := func(ctx context.Context, subject, reply string, p *Person) {
+			if ctx.Value("key1") != "value1" {
+				t.Errorf("Expected key1 to be value1")
+			}
+			if p.Name != "someone" {
+				t.Errorf("Expected name to be someone")
+			}
+			if subject != "foo5" {
+				t.Errorf("Expected subject to be foo")
+			}
+			if err := nc.Publish(reply, []byte(p.Name)); err != nil {
+				t.Errorf("Failed to publish reply: %v", err)
+			}
+		}
+		em, err := NewEncodedMiddleware(handler, "json")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Add middleware, note that the replyMiddleware is not needed here
+		nr2 := nr.Use(em.EncodedMiddleware)
+
+		sub := nr2.Subject("foo5")
+		_, err = sub.Subscribe(emptyHandler)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg("foo5")
+		p := Person{Name: "someone", Age: 25}
+		msg.Data, err = json.Marshal(p)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !bytes.Equal([]byte("someone"), reply.Data) {
+			t.Errorf("responses do not match, expected someone, received %s", string(reply.Data))
 		}
 	})
 }
