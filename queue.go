@@ -7,14 +7,14 @@ import (
 // Queue group that can be subscribed to subjects
 type Queue struct {
 	n     *NatsRouter
-	group string
+	queue string
 }
 
 // Returns a new `Queue` object with additional middleware functions
 func (q *Queue) WithMiddleware(fns ...NatsMiddlewareFunc) *Queue {
 	return &Queue{
 		n:     q.n.Use(fns...),
-		group: q.group,
+		queue: q.queue,
 	}
 }
 
@@ -26,12 +26,12 @@ func (q *Queue) Use(fns ...NatsMiddlewareFunc) *Queue {
 // Subscribe to a subject as a part of this queue group with the specified
 // handler function
 func (q *Queue) Subscribe(subject string, handler NatsCtxHandler) (*nats.Subscription, error) {
-	return q.n.QueueSubscribe(subject, q.group, handler)
+	return q.n.QueueSubscribe(subject, q.queue, handler)
 }
 
 // Same as Subscribe, with channel support
 func (q *Queue) ChanSubscribe(subject string, ch chan *NatsMsg) (*nats.Subscription, error) {
-	return q.n.ChanQueueSubscribe(subject, q.group, ch)
+	return q.n.ChanQueueSubscribe(subject, q.queue, ch)
 }
 
 // Create a new `Subject` object that is part of this `Queue` group

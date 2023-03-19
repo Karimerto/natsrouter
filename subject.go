@@ -64,12 +64,12 @@ func (s *Subject) All() *Subject {
 
 // This method returns a new subject with a queue group that is used to load
 // balance messages across multiple subscribers.
-func (s *Subject) Queue(group string) *Subject {
+func (s *Subject) Queue(queue string) *Subject {
 	return &Subject{
 		n: s.n,
 		queue: &Queue{
 			n:     s.n,
-			group: group,
+			queue: queue,
 		},
 		subjects: s.subjects,
 	}

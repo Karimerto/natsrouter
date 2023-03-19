@@ -253,8 +253,8 @@ func (n *NatsRouter) Subscribe(subject string, handler NatsCtxHandler) (*nats.Su
 // QueueSubscribe registers a handler function for the specified subject and
 // queue group and returns a *nats.Subscription. The handler function is wrapped
 // with any registered middleware functions in reverse order.
-func (n *NatsRouter) QueueSubscribe(subject, group string, handler NatsCtxHandler) (*nats.Subscription, error) {
-	return n.nc.QueueSubscribe(subject, group, n.msgHandler(handler))
+func (n *NatsRouter) QueueSubscribe(subject, queue string, handler NatsCtxHandler) (*nats.Subscription, error) {
+	return n.nc.QueueSubscribe(subject, queue, n.msgHandler(handler))
 }
 
 // Handler that wraps function call with any registered middleware functions in
@@ -310,11 +310,11 @@ func (n *NatsRouter) ChanSubscribe(subject string, ch chan *NatsMsg) (*nats.Subs
 // Same as QueueSubscribe, except uses channels. Note that error handling is
 // available only for middleware, since the message is processed first by
 // middleware and then inserted into the *NatsMsg channel.
-func (n *NatsRouter) ChanQueueSubscribe(subject, group string, ch chan *NatsMsg) (*nats.Subscription, error) {
+func (n *NatsRouter) ChanQueueSubscribe(subject, queue string, ch chan *NatsMsg) (*nats.Subscription, error) {
 	intCh := make(chan *nats.Msg, 64)
 	n.chanWg.Add(1)
 	go n.chanMsgHandler(ch, intCh)
-	return n.nc.ChanQueueSubscribe(subject, group, intCh)
+	return n.nc.ChanQueueSubscribe(subject, queue, intCh)
 }
 
 // Handler that wraps function call with any registered middleware functions in
@@ -376,11 +376,11 @@ func (n *NatsRouter) Publish(subject string, data []byte) error {
 	return n.nc.Publish(subject, data)
 }
 
-// Returns a new `Queue` object with the given group name
-func (n *NatsRouter) Queue(group string) *Queue {
+// Returns a new `Queue` object with the given queue name
+func (n *NatsRouter) Queue(queue string) *Queue {
 	return &Queue{
 		n:     n,
-		group: group,
+		queue: queue,
 	}
 }
 
