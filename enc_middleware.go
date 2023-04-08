@@ -14,11 +14,11 @@ type EncodedMiddleware struct {
 	enc nats.Encoder
 }
 
-//	handler := func(m *NatsMsg)
-//	handler := func(ctx context.Context, m *Msg)
-//	handler := func(ctx context.Context, p *person)
-//	handler := func(ctx context.Context, subject string, o *obj)
-//	handler := func(ctx context.Context, subject, reply string, o *obj)
+// handler := func(m *NatsMsg)
+// handler := func(ctx context.Context, m *Msg)
+// handler := func(ctx context.Context, p *person)
+// handler := func(ctx context.Context, subject string, o *obj)
+// handler := func(ctx context.Context, subject, reply string, o *obj)
 type Handler interface{}
 
 // Create a new EncodedConn middleware with given encoder type
@@ -74,7 +74,7 @@ func (e *EncodedMiddleware) EncodedMiddleware(NatsCtxHandler) NatsCtxHandler {
 				oPtr = reflect.New(argType.Elem())
 			}
 			if err := e.enc.Decode(msg.Subject, msg.Data, oPtr.Interface()); err != nil {
-				return errors.New("natsrouter: Got an error trying to unmarshal: "+err.Error())
+				return errors.New("natsrouter: Got an error trying to unmarshal: " + err.Error())
 			}
 			if argType.Kind() != reflect.Ptr {
 				oPtr = reflect.Indirect(oPtr)

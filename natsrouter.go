@@ -14,13 +14,20 @@ is the last in the chain.
 package natsrouter
 
 import (
+	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"sync"
 
 	"github.com/nats-io/nats.go"
 )
+
+var ErrUnsupportedEncoding = errors.New("unsupported encoding")
 
 // Handler function that adds a `context.Context` to a `*nats.Msg`
 type NatsCtxHandler func(*NatsMsg) error
@@ -172,8 +179,8 @@ func (r RouterOptions) Connect() (*NatsRouter, error) {
 	// Create router instance
 	router := &NatsRouter{
 		options: r,
-		quit:   make(chan struct{}),
-		closed: make(chan struct{}),
+		quit:    make(chan struct{}),
+		closed:  make(chan struct{}),
 	}
 
 	// Set custom closed callback
@@ -213,7 +220,7 @@ func (n *NatsRouter) Drain() {
 	n.nc.Drain()
 
 	// Wait until it is done
-	<- n.closed
+	<-n.closed
 }
 
 // Close connection to NATS server
@@ -257,21 +264,48 @@ func (n *NatsRouter) QueueSubscribe(subject, queue string, handler NatsCtxHandle
 	return n.nc.QueueSubscribe(subject, queue, n.msgHandler(handler))
 }
 
+// Read possibly-compressed content
+func readCompressedData(encoding string, data []byte) ([]byte, error) {
+	if encoding == "gzip" {
+		zr, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		defer zr.Close()
+		return io.ReadAll(zr)
+	} else if encoding == "deflate" {
+		fr := flate.NewReader(bytes.NewReader(data))
+		defer fr.Close()
+		return io.ReadAll(fr)
+	} else if len(encoding) > 0 {
+		return nil, ErrUnsupportedEncoding
+	}
+	return data, nil
+}
+
 // Handler that wraps function call with any registered middleware functions in
 // reverse order. On any error, an error message is automatically sent as a
 // response to the request.
 func (n *NatsRouter) msgHandler(handler NatsCtxHandler) func(*nats.Msg) {
 	return func(msg *nats.Msg) {
-		natsMsg := &NatsMsg{
-			msg,
-			context.Background(),
-		}
+		var err error
+		data, err := readCompressedData(msg.Header.Get("encoding"), msg.Data)
 
-		var wrappedHandler NatsCtxHandler = handler
-		for i := len(n.mw) - 1; i >= 0; i-- {
-			wrappedHandler = n.mw[i](wrappedHandler)
+		if err == nil {
+			// Replace data with decompressed data
+			msg.Data = data
+
+			natsMsg := &NatsMsg{
+				msg,
+				context.Background(),
+			}
+
+			var wrappedHandler NatsCtxHandler = handler
+			for i := len(n.mw) - 1; i >= 0; i-- {
+				wrappedHandler = n.mw[i](wrappedHandler)
+			}
+			err = wrappedHandler(natsMsg)
 		}
-		err := wrappedHandler(natsMsg)
 
 		if err != nil {
 			handlerErr, ok := err.(*HandlerError)
@@ -332,17 +366,25 @@ chanLoop:
 	for {
 		select {
 		case msg := <-intCh:
-			natsMsg := &NatsMsg{
-				msg,
-				context.Background(),
-			}
+			var err error
+			data, err := readCompressedData(msg.Header.Get("encoding"), msg.Data)
 
-			var wrappedHandler NatsCtxHandler = handler
-			for i := len(n.mw) - 1; i >= 0; i-- {
-				wrappedHandler = n.mw[i](wrappedHandler)
+			if err == nil {
+				// Replace data with decompressed data
+				msg.Data = data
+
+				natsMsg := &NatsMsg{
+					msg,
+					context.Background(),
+				}
+
+				var wrappedHandler NatsCtxHandler = handler
+				for i := len(n.mw) - 1; i >= 0; i-- {
+					wrappedHandler = n.mw[i](wrappedHandler)
+				}
+				// Errors are only handled for the middleware
+				err = wrappedHandler(natsMsg)
 			}
-			// Errors are only handled for the middleware
-			err := wrappedHandler(natsMsg)
 
 			if err != nil {
 				handlerErr, ok := err.(*HandlerError)

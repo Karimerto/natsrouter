@@ -2,9 +2,14 @@ package natsrouter
 
 import (
 	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,7 +71,7 @@ func TestConnect(t *testing.T) {
 	defer nr.Close()
 }
 
-func TestOptionsConnect(t *testing.T){
+func TestOptionsConnect(t *testing.T) {
 	// Create test server
 	opts := &server.Options{Host: "localhost", Port: server.RANDOM_PORT, NoSigs: true}
 	s, err := runServer(opts)
@@ -85,7 +90,7 @@ func TestOptionsConnect(t *testing.T){
 	defer nr.Close()
 }
 
-func TestDrain(t *testing.T){
+func TestDrain(t *testing.T) {
 	// Create test server
 	opts := &server.Options{Host: "localhost", Port: server.RANDOM_PORT, NoSigs: true}
 	s, err := runServer(opts)
@@ -100,7 +105,7 @@ func TestDrain(t *testing.T){
 		NatsOptions: nats.Options{
 			Url: s.Addr().String(),
 			ClosedCB: func(_ *nats.Conn) {
-				close (ch)
+				close(ch)
 			},
 		},
 	}
@@ -756,7 +761,7 @@ func TestChanSubscribe(t *testing.T) {
 	}
 
 	t.Run("channel-based subscribe", func(t *testing.T) {
-		sub := nr.Subject("foo")
+		sub := nr.Subject("foo_ch")
 		ch := make(chan *NatsMsg, 4)
 		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.ChanSubscribe(ch)
@@ -768,7 +773,7 @@ func TestChanSubscribe(t *testing.T) {
 		go respond(ch)
 
 		// Create message and send a request
-		msg := nats.NewMsg("foo")
+		msg := nats.NewMsg("foo_ch")
 		msg.Data = []byte("data")
 		reqId := "req-1"
 		msg.Header.Add("request_id", reqId)
@@ -787,7 +792,7 @@ func TestChanSubscribe(t *testing.T) {
 	})
 
 	t.Run("channel-based queue subscribe", func(t *testing.T) {
-		sub := nr.Queue("group").Subject("foo")
+		sub := nr.Queue("group").Subject("foo_queue_ch")
 		ch := make(chan *NatsMsg, 4)
 		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.ChanSubscribe(ch)
@@ -799,7 +804,7 @@ func TestChanSubscribe(t *testing.T) {
 		go respond(ch)
 
 		// Create message and send a request
-		msg := nats.NewMsg("foo")
+		msg := nats.NewMsg("foo_queue_ch")
 		msg.Data = []byte("data")
 		reqId := "req-1"
 		msg.Header.Add("request_id", reqId)
@@ -813,6 +818,320 @@ func TestChanSubscribe(t *testing.T) {
 			t.Errorf("header request_id does not match, expected %s, received %s", reqId, got)
 		}
 		if !bytes.Equal(msg.Data, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(msg.Data), string(reply.Data))
+		}
+	})
+}
+
+const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789{}[]:,"
+
+func RandBytes(n int) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letterBytes[rand.Int63()%int64(len(letterBytes))]
+	}
+	return b
+}
+
+func gzipData(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	// Compress with gzip
+	zw := gzip.NewWriter(&buf)
+	_, err := zw.Write(data)
+	if err != nil {
+		return nil, err
+	}
+	zw.Close()
+	return buf.Bytes(), nil
+}
+
+func gunzipData(data []byte) ([]byte, error) {
+	// Decompress with gzip
+	zr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	return io.ReadAll(zr)
+}
+
+func deflateData(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	// Compress with deflate
+	fw, _ := flate.NewWriter(&buf, flate.DefaultCompression)
+	_, err := fw.Write(data)
+	if err != nil {
+		return nil, err
+	}
+	fw.Close()
+	return buf.Bytes(), nil
+}
+
+func inflateData(data []byte) ([]byte, error) {
+	// Decompress with gzip
+	fr := flate.NewReader(bytes.NewReader(data))
+	defer fr.Close()
+	return io.ReadAll(fr)
+}
+
+type compressFunc func([]byte) ([]byte, error)
+
+func TestEncoding(t *testing.T) {
+	shortData := []byte("short")
+	longData := []byte(strings.Repeat("long", 2000))
+	shortRandomData := RandBytes(50)
+	longRandomData := RandBytes(5000)
+
+	// A simple echo handler
+	echoHandler := func(msg *NatsMsg) error {
+		// Send response with same content
+		if err := msg.Respond(msg.Data); err != nil {
+			t.Errorf("Failed to publish reply: %v", err)
+		}
+
+		return nil
+	}
+
+	// Create test server and router
+	s, nr := getServerAndRouter(t)
+	defer s.Shutdown()
+	defer nr.Close()
+
+	// Get underlying connection
+	nc := nr.Conn()
+
+	noEncodingTest := func(t *testing.T, subject string, data []byte) {
+		sub := nr.Subject(subject)
+		_, err := sub.Subscribe(echoHandler)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg(subject)
+		msg.Data = data
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !bytes.Equal(msg.Data, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(msg.Data), string(reply.Data))
+		}
+		if !bytes.Equal(data, reply.Data) {
+			t.Errorf("response does not match original, expected %s, received %s", string(data), string(reply.Data))
+		}
+	}
+
+	t.Run("no encoding, short data", func(t *testing.T) {
+		noEncodingTest(t, "foo_noenc_s", shortData)
+	})
+
+	t.Run("no encoding, long data", func(t *testing.T) {
+		noEncodingTest(t, "foo_noenc_l", longData)
+	})
+
+	compressClientEncodingTest := func(t *testing.T, subject string, data []byte, hdr string, compress compressFunc) {
+		sub := nr.Subject(subject)
+		_, err := sub.Subscribe(func(msg *NatsMsg) error {
+			// Content should have been unzipped at this point
+			if !bytes.Equal(data, msg.Data) {
+				t.Errorf("request data does not match, expected %s, received %s", string(data), string(msg.Data))
+			}
+			// Send response with same content
+			if err := msg.Respond(msg.Data); err != nil {
+				t.Errorf("Failed to publish reply: %v", err)
+			}
+
+			return nil
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message with gzipped data
+		msg := nats.NewMsg(subject)
+		zipped, err := compress(data)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		msg.Data = zipped
+
+		// Add the encoding header
+		msg.Header.Add("encoding", hdr)
+
+		// Send request and verify
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !bytes.Equal(data, reply.Data) {
+			t.Errorf("responses do not match, expected %s, received %s", string(data), string(reply.Data))
+		}
+	}
+
+	compressServerEncodingTest := func(t *testing.T, subject string, data []byte, hdr string, compressed bool, decompress compressFunc) {
+		sub := nr.Subject(subject)
+		_, err := sub.Subscribe(func(msg *NatsMsg) error {
+			// Content is not compressed, just verify
+			if !bytes.Equal(data, msg.Data) {
+				t.Errorf("request data does not match, expected %s, received %s", string(data), string(msg.Data))
+			}
+			// Send response with same content, this should compress automatically
+			if err := msg.Respond(msg.Data); err != nil {
+				t.Errorf("Failed to publish reply: %v", err)
+			}
+
+			return nil
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message with gzipped data
+		msg := nats.NewMsg(subject)
+		msg.Data = data
+
+		// Add the accept-encoding header
+		msg.Header.Add("accept-encoding", hdr)
+
+		// Send request and verify
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		received := reply.Data
+		if compressed {
+			received, err = decompress(received)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		}
+		if !bytes.Equal(data, received) {
+			t.Errorf("responses do not match, expected %s, received %s", string(data), string(received))
+		}
+	}
+
+	compressSCEncodingTest := func(t *testing.T, subject string, data []byte, hdr string, compressed bool, compress, decompress compressFunc) {
+		sub := nr.Subject(subject)
+		_, err := sub.Subscribe(func(msg *NatsMsg) error {
+			// Content is not compressed, just verify
+			if !bytes.Equal(data, msg.Data) {
+				t.Errorf("request data does not match, expected %s, received %s", string(data), string(msg.Data))
+			}
+			// Send response with same content, this should compress automatically
+			if err := msg.Respond(msg.Data); err != nil {
+				t.Errorf("Failed to publish reply: %v", err)
+			}
+
+			return nil
+		})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message with gzipped data
+		msg := nats.NewMsg(subject)
+		zipped, err := compress(data)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		msg.Data = zipped
+
+		// Add the encoding header
+		msg.Header.Add("encoding", hdr)
+
+		// Add the accept-encoding header
+		msg.Header.Add("accept-encoding", hdr)
+
+		// Send request and verify
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		received := reply.Data
+		if compressed {
+			received, err = decompress(received)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		}
+		if !bytes.Equal(data, received) {
+			t.Errorf("responses do not match, expected %s, received %s", string(data), string(received))
+		}
+	}
+
+	t.Run("client gzip encoding, short data", func(t *testing.T) {
+		compressClientEncodingTest(t, "foo_cli_gzip_s", shortRandomData, "gzip", gzipData)
+	})
+
+	t.Run("client gzip encoding, long data", func(t *testing.T) {
+		compressClientEncodingTest(t, "foo_cli_gzip_l", longRandomData, "gzip", gzipData)
+	})
+
+	t.Run("server gzip encoding, short data", func(t *testing.T) {
+		compressServerEncodingTest(t, "foo_srv_gzip_s", shortRandomData, "gzip", false, gunzipData)
+	})
+
+	t.Run("server gzip encoding, long data", func(t *testing.T) {
+		compressServerEncodingTest(t, "foo_srv_gzip_l", longRandomData, "gzip", true, gunzipData)
+	})
+
+	t.Run("server+client gzip encoding, short data", func(t *testing.T) {
+		compressSCEncodingTest(t, "foo_sc_gzip_s", shortRandomData, "gzip", false, gzipData, gunzipData)
+	})
+
+	t.Run("server+client gzip encoding, long data", func(t *testing.T) {
+		compressSCEncodingTest(t, "foo_sc_gzip_l", longRandomData, "gzip", true, gzipData, gunzipData)
+	})
+
+	t.Run("client deflate encoding, short data", func(t *testing.T) {
+		compressClientEncodingTest(t, "foo_cli_deflate_s", shortRandomData, "deflate", deflateData)
+	})
+
+	t.Run("client deflate encoding, long data", func(t *testing.T) {
+		compressClientEncodingTest(t, "foo_cli_deflate_l", longRandomData, "deflate", deflateData)
+	})
+
+	t.Run("server deflate encoding, short data", func(t *testing.T) {
+		compressServerEncodingTest(t, "foo_srv_deflate_s", shortRandomData, "deflate", false, inflateData)
+	})
+
+	t.Run("server deflate encoding, long data", func(t *testing.T) {
+		compressServerEncodingTest(t, "foo_srv_deflate_l", longRandomData, "deflate", true, inflateData)
+	})
+
+	t.Run("server+client deflate encoding, short data", func(t *testing.T) {
+		compressSCEncodingTest(t, "foo_sc_deflate_s", shortRandomData, "deflate", false, deflateData, inflateData)
+	})
+
+	t.Run("server+client deflate encoding, long data", func(t *testing.T) {
+		compressSCEncodingTest(t, "foo_sc_deflate_l", longRandomData, "deflate", true, deflateData, inflateData)
+	})
+
+	t.Run("unsupported encoding error", func(t *testing.T) {
+		subject := "foo_err_enc"
+		sub := nr.Subject(subject)
+		_, err := sub.Subscribe(emptyHandler)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		// Create message and send a request
+		msg := nats.NewMsg(subject)
+		msg.Data = shortData
+		msg.Header.Add("encoding", "foo")
+
+		reply, err := nc.RequestMsg(msg, 1*time.Second)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		got := reply.Header.Get("error")
+		if got != "json" {
+			t.Errorf("error header does not match, expected %s, got %s", "json", got)
+		}
+		errJson := []byte("{\"message\":\"unsupported encoding\",\"code\":500}")
+		if !bytes.Equal(errJson, reply.Data) {
 			t.Errorf("responses do not match, expected %s, received %s", string(msg.Data), string(reply.Data))
 		}
 	})
