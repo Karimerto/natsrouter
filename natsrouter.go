@@ -82,13 +82,25 @@ func WithRequestIdTag(tag string) RouterOption {
 	}
 }
 
-// Append one or more nats.Option to the connection, before connecting
+// Set nats.Options for the connection before connecting
 func WithNatsOptions(nopts nats.Options) RouterOption {
 	return func(o *RouterOptions) {
 		o.NatsOptions = nopts
 	}
 }
 
+// Apply one or more nats.Option to the config before connecting
+func WithNatsOption(options... nats.Option) RouterOption {
+	return func(o *RouterOptions) {
+		for _, opt := range options {
+			if opt != nil {
+				opt(&o.NatsOptions)
+			}
+		}
+	}
+}
+
+// Get default RouterOptions
 func GetDefaultRouterOptions() RouterOptions {
 	return RouterOptions{
 		&ErrorConfig{"error", "json"},
