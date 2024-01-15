@@ -288,7 +288,6 @@ func TestMiddlewareChain(t *testing.T) {
 
 	t.Run("subscribe with middleware to single subject", func(t *testing.T) {
 		sub := nr.Subject("foo1")
-		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.Subscribe(handler)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -309,7 +308,6 @@ func TestMiddlewareChain(t *testing.T) {
 
 	t.Run("subscribe with middleware and queue group to single subject", func(t *testing.T) {
 		sub := nr.Queue("group").Subject("foo2")
-		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.Subscribe(handler)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -600,7 +598,6 @@ func TestError(t *testing.T) {
 		defer nr.Close()
 
 		sub := nr.Subject("foo")
-		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.Subscribe(errHandler)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -626,7 +623,7 @@ func TestError(t *testing.T) {
 
 	t.Run("return custom error", func(t *testing.T) {
 		// Create test server and router
-		s, nr := getServerAndRouter(t)
+		s, _ := getServerAndRouter(t)
 		defer s.Shutdown()
 
 		// Create router and connect to test server
@@ -641,7 +638,6 @@ func TestError(t *testing.T) {
 		defer nr.Close()
 
 		sub := nr.Subject("foo")
-		// _, err := sub.Subscribe(emptyHandler)
 		_, err = sub.Subscribe(errHandler)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -683,7 +679,6 @@ func TestRequestId(t *testing.T) {
 		defer nr.Close()
 
 		sub := nr.Subject("foo")
-		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.Subscribe(errHandler)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -721,7 +716,6 @@ func TestRequestId(t *testing.T) {
 		defer nr.Close()
 
 		sub := nr.Subject("foo")
-		// _, err := sub.Subscribe(emptyHandler)
 		_, err = sub.Subscribe(errHandler)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -763,7 +757,6 @@ func TestChanSubscribe(t *testing.T) {
 	t.Run("channel-based subscribe", func(t *testing.T) {
 		sub := nr.Subject("foo_ch")
 		ch := make(chan *NatsMsg, 4)
-		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.ChanSubscribe(ch)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -794,7 +787,6 @@ func TestChanSubscribe(t *testing.T) {
 	t.Run("channel-based queue subscribe", func(t *testing.T) {
 		sub := nr.Queue("group").Subject("foo_queue_ch")
 		ch := make(chan *NatsMsg, 4)
-		// _, err := sub.Subscribe(emptyHandler)
 		_, err := sub.ChanSubscribe(ch)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
